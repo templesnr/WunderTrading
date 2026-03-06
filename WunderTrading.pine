@@ -1,6 +1,6 @@
-// WunderTrading Strategy V4.12
+// WunderTrading Strategy V4.12a
 //@version=6
-strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=5746, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
 // ─────────────────────────────────────────
 // INPUTS
@@ -14,7 +14,7 @@ atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",     minval=1.
 cooldownBars   = input.int(1,      "Cooldown Bars After Exit",         minval=0,    maxval=20)
 tradePercent   = input.float(10.0, "% of Equity Per Trade",           minval=1.0,  maxval=100.0)
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
-trackFromDate  = input.time(timestamp("2024-01-01"), "Track Equity From Date")
+trackFromDate  = input.time(timestamp("2026-03-03"), "Track Equity From Date")
 
 // ─────────────────────────────────────────
 // WUNDERTRADING ALERT MESSAGES
@@ -142,9 +142,9 @@ if isExit
          size      = size.small)
 
 // ─────────────────────────────────────────
-// MAIN DASHBOARD — middle_right
+// MAIN DASHBOARD — bottom_lefts
 // ─────────────────────────────────────────
-var table dash = table.new(position.middle_left, 3, 14, bgcolor=color.new(color.black, 15), border_width=1)
+var table dash = table.new(position.bottom_left, 3, 14, bgcolor=color.new(color.black, 15), border_width=1)
 if barstate.islastconfirmedhistory or barstate.islast
     table.cell(dash, 0, 0, "Condition",           width=14, height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_left,   text_size=size.small)
     table.cell(dash, 1, 0, "Value",               width=8,  height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_center, text_size=size.small)
@@ -215,11 +215,11 @@ if barstate.islastconfirmedhistory or barstate.islast
     table.cell(dash, 2, 13, "SIZE",               width=7,  height=2, bgcolor=color.rgb(30,100,200), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
 // ─────────────────────────────────────────
-// TRAFFIC LIGHTS — middle_left
+// TRAFFIC LIGHTS — bottom_center
 // - Separate from main dashboard to avoid conflict
 // - Uses coloured ● dots (text_color does the green/red work)
 // - barstate.islastconfirmedhistory ensures stable rendering
-// - middle_left is clear of all TradingView UI chrome
+// - bottom_center is clear of all TradingView UI chrome
 // ─────────────────────────────────────────
 
 // Helper function: always returns ● dot, colour is handled by text_color
