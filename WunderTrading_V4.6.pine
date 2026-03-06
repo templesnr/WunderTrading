@@ -1,22 +1,22 @@
-// WunderTrading Strategy V4.6
-// Fixes applied from V4.5:
-//   - Smarter multi-layered exit (RSI threshold raised, EMA9 exit gated by 200 EMA)
-//   - Squeeze counts as 2 points in scoring system (rewards the setup)
-//   - Cooldown bar logic to prevent immediate re-entry after exit
-//   - Cleaner dashboard showing all 5 conditions + cooldown state
+// WunderTrading Strategy V4.7
+// Changes from V4.6:
+//   - Compounding: position size is now % of equity, not fixed cash
+//   - tradePercent input lets you control how much equity per trade
+//   - Dashboard now shows live equity, position value in $, and profit vs initial capital
 //@version=6
-strategy("WunderTrading Strategy V4.6", overlay=true, initial_capital=1000, default_qty_type=strategy.cash, default_qty_value=100)
+strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
 
 // ─────────────────────────────────────────
 // INPUTS
 // ─────────────────────────────────────────
-rsiThreshold   = input.float(53.0, "RSI Buy Threshold",         minval=40.0, maxval=70.0)
-rsiExitLevel   = input.float(45.0, "RSI Exit Level",            minval=30.0, maxval=55.0)
-bbMult         = input.float(2.0,  "BB Multiplier",             minval=1.0,  maxval=4.0)
-intensTarget   = input.int(40,     "Bull Intensity Score Target",minval=10,   maxval=90)
-scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",  minval=1,    maxval=6)  // Max is now 6 (squeeze = 2pts)
-atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier", minval=1.0, maxval=6.0)
-cooldownBars   = input.int(3,      "Cooldown Bars After Exit",  minval=0,    maxval=20)
+rsiThreshold   = input.float(53.0, "RSI Buy Threshold",              minval=40.0, maxval=70.0)
+rsiExitLevel   = input.float(45.0, "RSI Exit Level",                 minval=30.0, maxval=55.0)
+bbMult         = input.float(2.0,  "BB Multiplier",                  minval=1.0,  maxval=4.0)
+intensTarget   = input.int(40,     "Bull Intensity Score Target",     minval=10,   maxval=90)
+scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",        minval=1,    maxval=6)
+atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",    minval=1.0,  maxval=6.0)
+cooldownBars   = input.int(1,      "Cooldown Bars After Exit",        minval=0,    maxval=20)  // 1 bar = 2 days on 2D timeframe
+tradePercent   = input.float(10.0, "% of Equity Per Trade",          minval=1.0,  maxval=100.0)
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
 
 // ─────────────────────────────────────────
@@ -89,17 +89,17 @@ var float trailStop = na
 // EXECUTION
 // ─────────────────────────────────────────
 if buyCondition and strategy.position_size == 0
-    strategy.entry("V4.6 Long", strategy.long, comment="SCORE:" + str.tostring(score) + "/6")
+    strategy.entry("V4.7 Long", strategy.long, qty=(strategy.equity * (tradePercent / 100)) / close, comment="SCORE:" + str.tostring(score) + "/6")
     trailStop := close - (atrVal * atrMult)
 
 if strategy.position_size > 0
     trailStop := math.max(nz(trailStop[1], close - atrVal * atrMult), close - (atrVal * atrMult))
     if close < trailStop
-        strategy.close("V4.6 Long", comment="ATR STOP")
+        strategy.close("V4.7 Long", comment="ATR STOP")
         trailStop := na
     else if sellCondition
         exitReason = macdExit ? "MACD EXIT" : rsiExit ? "RSI EXIT" : "EMA9 EXIT"
-        strategy.close("V4.6 Long", comment=exitReason)
+        strategy.close("V4.7 Long", comment=exitReason)
         trailStop := na
 
 // ─────────────────────────────────────────
@@ -109,46 +109,62 @@ plot(emaTrend, "200 EMA", color.new(color.gray, 50), 1)
 plot(ema9,     "EMA 9",   color.new(color.blue, 60),  1)
 plot(strategy.position_size > 0 ? trailStop : na, "Trailing Stop", color.red, 2, plot.style_linebr)
 
-plotshape(buyCondition and strategy.position_size == 0, "BUY V4.6", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(buyCondition and strategy.position_size == 0, "BUY V4.7", shape.triangleup, location.belowbar, color.green, size=size.small)
 if buyCondition and strategy.position_size == 0
     label.new(bar_index, low, text="BUY\n" + str.tostring(score) + "/6", color=color.green, textcolor=color.white, style=label.style_label_up, size=size.small)
 
 bgcolor(strategy.position_size > 0 ? color.new(color.green, 93) : na)
 
 // ─────────────────────────────────────────
-// DASHBOARD
+// DASHBOARD (V4.7 — Compounding Aware)
 // ─────────────────────────────────────────
-var table dash = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 15), border_width=1)
+var table dash = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 15), border_width=1)
 if barstate.islast
-    // Header
-    table.cell(dash, 0, 0, "V4.6 Condition",     text_color=color.white,  text_halign=text.align_left,   bgcolor=color.new(color.navy, 20))
-    table.cell(dash, 1, 0, "Status",              text_color=color.white,  text_halign=text.align_center, bgcolor=color.new(color.navy, 20))
+    // ── Header ──
+    table.cell(dash, 0, 0, "V4.7 Condition",      text_color=color.white,  text_halign=text.align_left,   bgcolor=color.new(color.navy, 20))
+    table.cell(dash, 1, 0, "Status",               text_color=color.white,  text_halign=text.align_center, bgcolor=color.new(color.navy, 20))
 
-    // Conditions
-    table.cell(dash, 0, 1, "1. Trend (200 EMA)",  text_color=color.silver, text_halign=text.align_left)
+    // ── Signal Conditions ──
+    table.cell(dash, 0, 1, "1. Trend (200 EMA)",   text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 1, cond_trend  ? "✓ PASS" : "✗ WAIT", bgcolor=cond_trend  ? color.new(color.green, 30) : color.new(color.red, 30), text_color=color.white)
 
     table.cell(dash, 0, 2, "2. RSI (" + str.tostring(math.round(myRsi, 1)) + " ≥ " + str.tostring(rsiThreshold) + ")", text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 2, cond_rsi    ? "✓ PASS" : "✗ WAIT", bgcolor=cond_rsi    ? color.new(color.green, 30) : color.new(color.red, 30), text_color=color.white)
 
-    table.cell(dash, 0, 3, "3. MACD Momentum",    text_color=color.silver, text_halign=text.align_left)
+    table.cell(dash, 0, 3, "3. MACD Momentum",     text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 3, cond_macd   ? "✓ PASS" : "✗ WAIT", bgcolor=cond_macd   ? color.new(color.green, 30) : color.new(color.red, 30), text_color=color.white)
 
     table.cell(dash, 0, 4, "4. Intensity (" + str.tostring(math.round(bullIntensity, 1)) + ")", text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 4, cond_intens ? "✓ PASS" : "✗ WAIT", bgcolor=cond_intens ? color.new(color.green, 30) : color.new(color.red, 30), text_color=color.white)
 
-    table.cell(dash, 0, 5, "5. Squeeze (×2 pts)", text_color=color.silver, text_halign=text.align_left)
+    table.cell(dash, 0, 5, "5. Squeeze (×2 pts)",  text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 5, cond_sqz    ? "✓ FIRED" : "✗ COILING", bgcolor=cond_sqz ? color.new(color.green, 30) : color.new(color.orange, 30), text_color=color.white)
 
-    // Score
-    table.cell(dash, 0, 6, "Total Score",         text_color=color.white,  text_halign=text.align_left)
+    // ── Score ──
+    table.cell(dash, 0, 6, "Total Score",          text_color=color.white,  text_halign=text.align_left)
     table.cell(dash, 1, 6, str.tostring(score) + " / 6", bgcolor=score >= scoreTarget ? color.new(color.green, 20) : color.new(color.red, 30), text_color=color.white)
 
-    // Cooldown
-    table.cell(dash, 0, 7, "Cooldown Remaining",  text_color=color.silver, text_halign=text.align_left)
+    // ── Cooldown ──
+    table.cell(dash, 0, 7, "Cooldown Remaining",   text_color=color.silver, text_halign=text.align_left)
     cdRemain = math.max(cooldownBars - barsSinceSell, 0)
     table.cell(dash, 1, 7, cdRemain == 0 ? "✓ READY" : str.tostring(cdRemain) + " bars", bgcolor=cdRemain == 0 ? color.new(color.green, 30) : color.new(color.gray, 30), text_color=color.white)
 
-    // Position state
-    table.cell(dash, 0, 8, "Position",            text_color=color.silver, text_halign=text.align_left)
+    // ── Position ──
+    table.cell(dash, 0, 8, "Position",             text_color=color.silver, text_halign=text.align_left)
     table.cell(dash, 1, 8, strategy.position_size > 0 ? "● IN TRADE" : "○ FLAT", bgcolor=strategy.position_size > 0 ? color.new(color.teal, 20) : color.new(color.gray, 40), text_color=color.white)
+
+    // ── Compounding Stats ──
+    currentEquity  = strategy.equity
+    initialCap     = strategy.initial_capital
+    profitPct      = ((currentEquity - initialCap) / initialCap) * 100
+    tradeValueUSD  = currentEquity * (tradePercent / 100)
+    tradeColor     = profitPct >= 0 ? color.new(color.green, 20) : color.new(color.red, 30)
+
+    table.cell(dash, 0, 9,  "── Compounding ──",   text_color=color.yellow, text_halign=text.align_left, bgcolor=color.new(color.black, 30))
+    table.cell(dash, 1, 9,  "",                     bgcolor=color.new(color.black, 30))
+
+    table.cell(dash, 0, 10, "Current Equity",       text_color=color.silver, text_halign=text.align_left)
+    table.cell(dash, 1, 10, "$" + str.tostring(math.round(currentEquity, 2)) + " (" + (profitPct >= 0 ? "+" : "") + str.tostring(math.round(profitPct, 1)) + "%)", bgcolor=tradeColor, text_color=color.white)
+
+    table.cell(dash, 0, 11, "Next Trade Size (" + str.tostring(tradePercent) + "%)", text_color=color.silver, text_halign=text.align_left)
+    table.cell(dash, 1, 11, "$" + str.tostring(math.round(tradeValueUSD, 2)), bgcolor=color.new(color.blue, 30), text_color=color.white)
