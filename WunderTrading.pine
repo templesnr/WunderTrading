@@ -1,6 +1,10 @@
-// WunderTrading Strategy V4.12a
+// WunderTrading Strategy V4.15
+// - Fixed: barstate.islastconfirmedhistory or barstate.islast (matching working v4.11)
 //@version=6
-strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=5746, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+strategy("WunderTrading Strategy V4.15", overlay=true, initial_capital=5746, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+
+// Helper: coloured dot for traffic lights
+dot(b) => "●"
 
 // ─────────────────────────────────────────
 // INPUTS
@@ -14,40 +18,35 @@ atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",     minval=1.
 cooldownBars   = input.int(1,      "Cooldown Bars After Exit",         minval=0,    maxval=20)
 tradePercent   = input.float(10.0, "% of Equity Per Trade",           minval=1.0,  maxval=100.0)
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
-trackFromDate  = input.time(timestamp("2026-03-03"), "Track Equity From Date")
+trackFromDate  = input.time(timestamp("2026-01-01"), "Track Equity From Date")
 
-// ─────────────────────────────────────────
 // WUNDERTRADING ALERT MESSAGES
-// ─────────────────────────────────────────
-enterLongMsg = input.string("ENTER-LONG_Coinbase_BTC-USDC_BTC-USDC Bot_4D_d2c2331562dd2a6584ef2310", "WunderTrading BTC BUY Message")
-exitLongMsg  = input.string("EXIT-LONG_Coinbase_BTC-USDC_BTC-USDC Bot_4D_d2c2331562dd2a6584ef2310",  "WunderTrading BTC SELL Message")
+enterLongMsg = input.string("PASTE_BUY_MSG",  "WunderTrading BUY Message")
+exitLongMsg  = input.string("PASTE_SELL_MSG", "WunderTrading SELL Message")
 
 // ─────────────────────────────────────────
 // CORE CALCULATIONS
 // ─────────────────────────────────────────
-bbLen         = 20
-myRsi         = ta.rsi(close, 14)
-[macdLine, signalLine, histLine] = ta.macd(close, 12, 26, 9)
-emaTrend      = ta.ema(close, 200)
-ema9          = ta.ema(close, 9)
-atrVal        = ta.atr(14)
+bbLen = 20
+myRsi = ta.rsi(close, 14)
+[macdLine, signalLine, _] = ta.macd(close, 12, 26, 9)
+emaTrend = ta.ema(close, 200)
+ema9     = ta.ema(close, 9)
+atrVal   = ta.atr(14)
 
+// Bull Intensity & Squeeze logic
 upperBand     = ta.ema(close, bbLen) + ta.stdev(close, bbLen) * bbMult
 bull_num      = math.sum(math.max(close - upperBand, 0), bbLen)
 bull_den      = math.sum(math.abs(close - upperBand), bbLen)
 bullIntensity = bull_den != 0 ? (bull_num / bull_den) * 100 : 0
+sqz_fire      = not ((ta.stdev(close, bbLen) * bbMult) <= (ta.sma(ta.tr, bbLen) * 1.5))
 
-sqz_on        = (ta.stdev(close, bbLen) * bbMult) <= (ta.sma(ta.tr, bbLen) * 1.5)
-sqz_fire      = not sqz_on
-
-// ─────────────────────────────────────────
 // SCORING
-// ─────────────────────────────────────────
-cond_trend    = not useTrendFilter or (close > emaTrend)
-cond_rsi      = myRsi >= rsiThreshold
-cond_macd     = macdLine > signalLine
-cond_intens   = bullIntensity > intensTarget
-cond_sqz      = sqz_fire
+cond_trend  = not useTrendFilter or (close > emaTrend)
+cond_rsi    = myRsi >= rsiThreshold
+cond_macd   = macdLine > signalLine
+cond_intens = bullIntensity > intensTarget
+cond_sqz    = sqz_fire
 
 int score = 0
 score += cond_trend  ? 1 : 0
@@ -57,261 +56,146 @@ score += cond_intens ? 1 : 0
 score += cond_sqz    ? 2 : 0
 
 // ─────────────────────────────────────────
-// COOLDOWN
+// REVISED COOLDOWN (ChatGPT Logic)
 // ─────────────────────────────────────────
-var int barsSinceSell = 999
-if strategy.position_size > 0
-    barsSinceSell := 0
-else
-    barsSinceSell += 1
+var int barsSinceExit = 999
+justExited = strategy.position_size[1] > 0 and strategy.position_size == 0
 
-cooldownOk   = barsSinceSell >= cooldownBars
-buyCondition = score >= scoreTarget and cooldownOk
+if justExited
+    barsSinceExit := 0
+    else
+        barsSinceExit += 1
 
-// ─────────────────────────────────────────
-// EQUITY TRACKING FROM DATE
-// ─────────────────────────────────────────
-var float equityAtStartDate = na
-if na(equityAtStartDate) and time >= trackFromDate
-    equityAtStartDate := strategy.equity
-rsiExit       = myRsi < rsiExitLevel and myRsi < myRsi[1]
-ema9Exit      = ta.crossunder(close, ema9) and close < emaTrend
-macdExit      = ta.crossunder(macdLine, signalLine)
-sellCondition = macdExit or rsiExit or ema9Exit
+        cooldownOk = barsSinceExit >= cooldownBars
 
-// ─────────────────────────────────────────
-// TRAILING STOP
-// ─────────────────────────────────────────
-var float trailStop = na
+        // ─────────────────────────────────────────
+        // EXIT LOGIC & TRAILING STOP
+        // ─────────────────────────────────────────
+        var float trailStop = na
+        rsiExit  = myRsi < rsiExitLevel and myRsi < myRsi[1]
+        ema9Exit = ta.crossunder(close, ema9) and close < emaTrend
+        macdExit = ta.crossunder(macdLine, signalLine)
+        sellCondition = macdExit or rsiExit or ema9Exit
 
-// ─────────────────────────────────────────
-// EXECUTION
-// ─────────────────────────────────────────
-if buyCondition and strategy.position_size == 0
-    strategy.entry("Long", strategy.long, qty=(strategy.equity * (tradePercent / 100)) / close, alert_message=enterLongMsg)
-    trailStop := close - (atrVal * atrMult)
+        // ─────────────────────────────────────────
+        // EXECUTION & EXPLICIT ALERTS
+        // ─────────────────────────────────────────
+        buyCondition = score >= scoreTarget and cooldownOk
+        enterSignal  = buyCondition and strategy.position_size == 0
+        exitSignal   = strategy.position_size > 0 and ((not na(trailStop) and close < trailStop) or sellCondition)
 
-if strategy.position_size > 0
-    trailStop := math.max(nz(trailStop[1], close - atrVal * atrMult), close - (atrVal * atrMult))
-    if close < trailStop
-        strategy.close("Long", alert_message=exitLongMsg, immediately=true)
-        trailStop := na
-    else if sellCondition
-        strategy.close("Long", alert_message=exitLongMsg, immediately=true)
-        trailStop := na
+        if enterSignal
+            alert(enterLongMsg, alert.freq_once_per_bar_close)
+            strategy.entry("Long", strategy.long, qty=(strategy.equity * (tradePercent / 100)) / close)
+            trailStop := close - (atrVal * atrMult)
 
-// ─────────────────────────────────────────
-// PLOTS
-// ─────────────────────────────────────────
-plot(emaTrend, "200 EMA", color.new(color.gray, 50), 1)
-plot(ema9,     "EMA 9",   color.new(color.blue, 60),  1)
-plot(strategy.position_size > 0 ? trailStop : na, "Trailing Stop", color.red, 2, plot.style_linebr)
-bgcolor(strategy.position_size > 0 ? color.new(color.green, 93) : na)
+            if strategy.position_size > 0
+                trailStop := math.max(nz(trailStop[1], close - (atrVal * atrMult)), close - (atrVal * atrMult))
 
-// Invisible spacer — pushes the bottom of the price scale down 15%
-// so candles never overlap the bottom_center traffic light table
-// Must NOT use display.none — needs to be visible to scale to affect the axis
-plot(low * 0.85, "spacer", color.new(color.black, 100))
+                if exitSignal
+                    alert(exitLongMsg, alert.freq_once_per_bar_close)
+                    strategy.close("Long", immediately=true)
+                    trailStop := na
 
-// ─────────────────────────────────────────
-// BUY LABELS
-// ─────────────────────────────────────────
-if buyCondition and strategy.position_size == 0
-    label.new(
-         x         = bar_index,
-         y         = low - (atrVal * 0.5),
-         text      = "▲ BUY " + str.tostring(score) + "/6",
-         color     = color.rgb(0, 180, 0),
-         textcolor = color.white,
-         style     = label.style_label_up,
-         size      = size.small)
+                    // ─────────────────────────────────────────
+                    // VISUALS: PLOTS & LABELS
+                    // ─────────────────────────────────────────
+                    plot(emaTrend, "200 EMA", color.new(color.gray, 50), 1)
+                    plot(strategy.position_size > 0 ? trailStop : na, "Stop", color.red, 2, plot.style_linebr)
 
-// ─────────────────────────────────────────
-// SELL LABELS
-// ─────────────────────────────────────────
-isExit = strategy.position_size[1] > 0 and strategy.position_size == 0
-if isExit
-    exitText = macdExit[1] ? "▼ MACD EXIT" : rsiExit[1] ? "▼ RSI EXIT" : ema9Exit[1] ? "▼ EMA9 EXIT" : "▼ ATR STOP"
-    label.new(
-         x         = bar_index,
-         y         = high + (atrVal * 0.5),
-         text      = exitText,
-         color     = color.rgb(220, 50, 50),
-         textcolor = color.white,
-         style     = label.style_label_down,
-         size      = size.small)
+                    // Invisible spacer to push the price scale so table doesn't cover candles
+                    plot(low * 0.85, "spacer", color.new(color.white, 100))
 
-// ─────────────────────────────────────────
-// MAIN DASHBOARD — bottom_lefts
-// ─────────────────────────────────────────
-var table dash = table.new(position.bottom_left, 3, 14, bgcolor=color.new(color.black, 15), border_width=1)
-if barstate.islastconfirmedhistory or barstate.islast
-    table.cell(dash, 0, 0, "Condition",           width=14, height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 0, "Value",               width=8,  height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 0, "Signal",              width=7,  height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_center, text_size=size.small)
+                    if enterSignal
+                        label.new(bar_index, low - (atrVal * 0.5), "▲ BUY " + str.tostring(score) + "/6", color=color.rgb(0, 180, 0), textcolor=color.white, style=label.style_label_up, size=size.small)
 
-    table.cell(dash, 0, 1, "1. Trend (200 EMA)",  width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 1, close > emaTrend ? "Above" : "Below", width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 1, cond_trend  ? "PASS" : "WAIT", width=7, height=2, bgcolor=cond_trend  ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                        if exitSignal
+                            label.new(bar_index, high + (atrVal * 0.5), "▼ SELL", color=color.rgb(220, 50, 50), textcolor=color.white, style=label.style_label_down, size=size.small)
 
-    table.cell(dash, 0, 2, "2. RSI Threshold",    width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 2, str.tostring(math.round(myRsi,1)) + " / " + str.tostring(rsiThreshold), width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 2, cond_rsi    ? "PASS" : "WAIT", width=7, height=2, bgcolor=cond_rsi    ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                            // ─────────────────────────────────────────
+                            // PRE-COMPUTE all values before barstate blocks (required in Pine v6)
+                            // ─────────────────────────────────────────
+                            isLong       = strategy.position_size > 0
+                            currentEquity = strategy.equity
+                            profitPct    = ((currentEquity - strategy.initial_capital) / strategy.initial_capital) * 100
+                            cdRemain     = math.max(cooldownBars - barsSinceExit, 0)
+                            trailStopVal = isLong and not na(trailStop) ? "$" + str.tostring(math.round(trailStop, 0)) : "—"
 
-    table.cell(dash, 0, 3, "3. MACD Momentum",    width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 3, macdLine > signalLine ? "Bull" : "Bear", width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 3, cond_macd   ? "PASS" : "WAIT", width=7, height=2, bgcolor=cond_macd   ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                            // ─────────────────────────────────────────
+                            // DASHBOARD 1: MAIN STATS (Middle Left)
+                            // ─────────────────────────────────────────
+                            var table dash = table.new(position.bottom_left, 3, 13, bgcolor=color.rgb(20, 20, 20), border_width=1, border_color=color.gray)
+                            if barstate.islastconfirmedhistory or barstate.islast
+                                table.cell(dash, 0, 0, "Condition",           text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_left,   text_size=size.small)
+                                table.cell(dash, 1, 0, "Value",               text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 0, "Signal",              text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 4, "4. Bull Intensity",   width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 4, str.tostring(math.round(bullIntensity,1)) + " / " + str.tostring(intensTarget), width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 4, cond_intens ? "PASS" : "WAIT", width=7, height=2, bgcolor=cond_intens ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 1, "1. Trend (200 EMA)",  text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 1, close > emaTrend ? "Above" : "Below", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 1, cond_trend  ? "PASS" : "WAIT", bgcolor=cond_trend  ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 5, "5. Squeeze (×2 pts)", width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 5, cond_sqz ? "Fired" : "Coiling", width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 5, cond_sqz    ? "YES"  : "WAIT",  width=7, height=2, bgcolor=cond_sqz ? color.rgb(76,175,80) : color.rgb(255,152,0), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 2, "2. RSI Threshold",    text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 2, str.tostring(math.round(myRsi,1)) + " / " + str.tostring(rsiThreshold), text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 2, cond_rsi    ? "PASS" : "WAIT", bgcolor=cond_rsi    ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 6, "──────────────────",  width=14, height=1, text_color=color.gray,   text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 6, "",                    width=8,  height=1, text_color=color.gray)
-    table.cell(dash, 2, 6, "",                    width=7,  height=1, text_color=color.gray)
+                                table.cell(dash, 0, 3, "3. MACD Momentum",    text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 3, macdLine > signalLine ? "Bull" : "Bear", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 3, cond_macd   ? "PASS" : "WAIT", bgcolor=cond_macd   ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 7, "TOTAL SCORE",         width=14, height=2, text_color=color.white,  text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 7, str.tostring(score) + " / 6", width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 7, score >= scoreTarget ? "BUY READY" : "BUILDING", width=7, height=2, bgcolor=score >= scoreTarget ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 4, "4. Bull Intensity",   text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 4, str.tostring(math.round(bullIntensity,1)) + " / " + str.tostring(intensTarget), text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 4, cond_intens ? "PASS" : "WAIT", bgcolor=cond_intens ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    cdRemain = math.max(cooldownBars - barsSinceSell, 0)
-    table.cell(dash, 0, 8, "Cooldown",            width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 8, cdRemain == 0 ? "0 bars" : str.tostring(cdRemain) + " bars", width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 8, cdRemain == 0 ? "READY" : "WAIT", width=7, height=2, bgcolor=cdRemain == 0 ? color.rgb(76,175,80) : color.rgb(158,158,158), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 5, "5. Squeeze (x2 pts)", text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 5, cond_sqz ? "Fired" : "Coiling", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 5, cond_sqz    ? "YES"  : "WAIT",  bgcolor=cond_sqz ? color.rgb(76,175,80) : color.rgb(255,152,0), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 9, "Position",            width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 9, strategy.position_size > 0 ? "Long" : "Flat", width=8, height=2, text_color=color.silver, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 9, strategy.position_size > 0 ? "IN TRADE" : "FLAT", width=7, height=2, bgcolor=strategy.position_size > 0 ? color.rgb(0,188,212) : color.rgb(100,100,100), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 6, "TOTAL SCORE",         text_color=color.white,  text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 6, str.tostring(score) + " / 6", text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 6, score >= scoreTarget ? "BUY READY" : "BUILDING", bgcolor=score >= scoreTarget ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    currentEquity = strategy.equity
-    initialCap    = strategy.initial_capital
-    profitPct     = ((currentEquity - initialCap) / initialCap) * 100
-    tradeValueUSD = currentEquity * (tradePercent / 100)
-    tradeColor    = profitPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50)
+                                table.cell(dash, 0, 7, "Cooldown",            text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 7, cdRemain == 0 ? "0 bars" : str.tostring(cdRemain) + " bars", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 7, cdRemain == 0 ? "READY" : "WAIT", bgcolor=cdRemain == 0 ? color.rgb(76,175,80) : color.rgb(158,158,158), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    // Growth since tracked date
-    trackedBase   = nz(equityAtStartDate, initialCap)
-    trackedPct    = ((currentEquity - trackedBase) / trackedBase) * 100
-    trackedColor  = trackedPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50)
+                                table.cell(dash, 0, 8, "Position",            text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 8, isLong ? "Long" : "Flat", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 8, isLong ? "IN TRADE" : "FLAT", bgcolor=isLong ? color.rgb(0,188,212) : color.rgb(100,100,100), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 10, "── Compounding ──",  width=14, height=2, text_color=color.yellow, text_halign=text.align_left, bgcolor=color.new(color.black, 30), text_size=size.small)
-    table.cell(dash, 1, 10, "",                   width=8,  height=2, bgcolor=color.new(color.black, 30))
-    table.cell(dash, 2, 10, "",                   width=7,  height=2, bgcolor=color.new(color.black, 30))
+                                table.cell(dash, 0, 9, "Trail Stop",          text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 9, trailStopVal,          text_color=isLong ? color.rgb(255,100,100) : color.gray, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 9, isLong ? "ACTIVE" : "—", bgcolor=isLong ? color.rgb(220,50,50) : color.rgb(80,80,80), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 11, "Current Equity",     width=14, height=2, text_color=color.silver, text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 11, "$" + str.tostring(math.round(currentEquity, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 11, (profitPct >= 0 ? "+" : "") + str.tostring(math.round(profitPct, 1)) + "%", width=7, height=2, bgcolor=tradeColor, text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 10, "── Equity ──",       text_color=color.yellow, text_halign=text.align_left,  bgcolor=color.rgb(40,40,40), text_size=size.small)
+                                table.cell(dash, 1, 10, "",                   bgcolor=color.rgb(40,40,40))
+                                table.cell(dash, 2, 10, "",                   bgcolor=color.rgb(40,40,40))
 
-    table.cell(dash, 0, 12, "Since " + str.format_time(trackFromDate, "dd MMM yy"), width=14, height=2, text_color=color.silver, text_halign=text.align_left, text_size=size.small)
-    table.cell(dash, 1, 12, "$" + str.tostring(math.round(trackedBase, 0)) + " → $" + str.tostring(math.round(currentEquity, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 12, (trackedPct >= 0 ? "+" : "") + str.tostring(math.round(trackedPct, 1)) + "%", width=7, height=2, bgcolor=trackedColor, text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 0, 11, "Current Equity",     text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
+                                table.cell(dash, 1, 11, "$" + str.tostring(math.round(currentEquity, 0)), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                table.cell(dash, 2, 11, (profitPct >= 0 ? "+" : "") + str.tostring(math.round(profitPct, 1)) + "%", bgcolor=profitPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 13, "Next Trade (" + str.tostring(tradePercent) + "%)", width=14, height=2, text_color=color.silver, text_halign=text.align_left, text_size=size.small)
-    table.cell(dash, 1, 13, "$" + str.tostring(math.round(tradeValueUSD, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 13, "SIZE",               width=7,  height=2, bgcolor=color.rgb(30,100,200), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+                                // ─────────────────────────────────────────
+                                // DASHBOARD 2: TRAFFIC LIGHTS (Bottom Center)
+                                // ─────────────────────────────────────────
+                                var table tl = table.new(position.bottom_center, 2, 7, bgcolor=color.rgb(20, 20, 20), border_width=1, border_color=color.gray)
+                                if barstate.islastconfirmedhistory or barstate.islast
+                                    table.cell(tl, 0, 0, "SIGNALS",              text_color=color.white,  bgcolor=score >= scoreTarget ? color.rgb(20,100,20) : color.rgb(100,20,20), text_size=size.small)
+                                    table.cell(tl, 1, 0, str.tostring(score) + "/6", text_color=color.white, bgcolor=score >= scoreTarget ? color.rgb(20,100,20) : color.rgb(100,20,20), text_size=size.small)
 
-// ─────────────────────────────────────────
-// TRAFFIC LIGHTS — bottom_center
-// - Separate from main dashboard to avoid conflict
-// - Uses coloured ● dots (text_color does the green/red work)
-// - barstate.islastconfirmedhistory ensures stable rendering
-// - bottom_center is clear of all TradingView UI chrome
-// ─────────────────────────────────────────
+                                    table.cell(tl, 0, 1, "Trend",                text_color=color.silver, text_size=size.small)
+                                    table.cell(tl, 1, 1, "●",                    text_color=cond_trend  ? color.rgb(76,175,80) : color.rgb(220,50,50), text_size=size.large)
 
-// Helper function: always returns ● dot, colour is handled by text_color
-dot(b) => b ? "●" : "●"
+                                    table.cell(tl, 0, 2, "RSI",                  text_color=color.silver, text_size=size.small)
+                                    table.cell(tl, 1, 2, "●",                    text_color=cond_rsi    ? color.rgb(76,175,80) : color.rgb(220,50,50), text_size=size.large)
 
-var table tl = table.new(
-     position.bottom_center,
-     2, 8,
-     border_width  = 1,
-     border_color  = color.new(color.gray, 50),
-     bgcolor       = color.rgb(20, 20, 20))
+                                    table.cell(tl, 0, 3, "MACD",                 text_color=color.silver, text_size=size.small)
+                                    table.cell(tl, 1, 3, "●",                    text_color=cond_macd   ? color.rgb(76,175,80) : color.rgb(220,50,50), text_size=size.large)
 
-if barstate.islastconfirmedhistory or barstate.islast
+                                    table.cell(tl, 0, 4, "Intensity",            text_color=color.silver, text_size=size.small)
+                                    table.cell(tl, 1, 4, "●",                    text_color=cond_intens ? color.rgb(76,175,80) : color.rgb(220,50,50), text_size=size.large)
 
-    // Header — green if ready to buy, red if not
-    table.cell(tl, 0, 0, "SIGNALS",  width=8, height=2,
-         text_color  = color.white,
-         bgcolor     = score >= scoreTarget ? color.rgb(20,100,20) : color.rgb(100,20,20),
-         text_halign = text.align_left,
-         text_size   = size.small)
-    table.cell(tl, 1, 0, str.tostring(score) + "/6", width=5, height=2,
-         text_color  = color.white,
-         bgcolor     = score >= scoreTarget ? color.rgb(20,100,20) : color.rgb(100,20,20),
-         text_halign = text.align_center,
-         text_size   = size.small)
+                                    table.cell(tl, 0, 5, "Squeeze",              text_color=color.silver, text_size=size.small)
+                                    table.cell(tl, 1, 5, "●",                    text_color=cond_sqz    ? color.rgb(76,175,80) : color.rgb(255,152,0), text_size=size.large)
 
-    // Trend
-    table.cell(tl, 0, 1, "Trend",    width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 1, dot(cond_trend), width=5, height=2,
-         text_color  = cond_trend ? color.rgb(76,175,80) : color.rgb(220,50,50),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // RSI
-    table.cell(tl, 0, 2, "RSI",      width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 2, dot(cond_rsi), width=5, height=2,
-         text_color  = cond_rsi ? color.rgb(76,175,80) : color.rgb(220,50,50),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // MACD
-    table.cell(tl, 0, 3, "MACD",     width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 3, dot(cond_macd), width=5, height=2,
-         text_color  = cond_macd ? color.rgb(76,175,80) : color.rgb(220,50,50),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // Intensity
-    table.cell(tl, 0, 4, "Intensity", width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 4, dot(cond_intens), width=5, height=2,
-         text_color  = cond_intens ? color.rgb(76,175,80) : color.rgb(220,50,50),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // Squeeze
-    table.cell(tl, 0, 5, "Squeeze",  width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 5, dot(cond_sqz), width=5, height=2,
-         text_color  = cond_sqz ? color.rgb(76,175,80) : color.rgb(255,152,0),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // Position
-    table.cell(tl, 0, 6, "Position", width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 6, strategy.position_size > 0 ? "●" : "●", width=5, height=2,
-         text_color  = strategy.position_size > 0 ? color.rgb(0,188,212) : color.rgb(150,150,150),
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.large)
-
-    // Trailing stop value
-    table.cell(tl, 0, 7, "Trail Stop", width=8, height=2,
-         text_color=color.silver, bgcolor=color.rgb(25,25,25),
-         text_halign=text.align_left, text_size=size.small)
-    table.cell(tl, 1, 7, strategy.position_size > 0 ? "$" + str.tostring(math.round(trailStop, 0)) : "—", width=5, height=2,
-         text_color  = strategy.position_size > 0 ? color.rgb(255,100,100) : color.gray,
-         bgcolor     = color.rgb(25,25,25),
-         text_halign = text.align_center,
-         text_size   = size.small)
+                                    table.cell(tl, 0, 6, isLong ? "IN TRADE" : "FLAT", text_color=color.white, bgcolor=isLong ? color.rgb(0,150,180) : color.rgb(80,80,80), text_size=size.small)
+                                    table.cell(tl, 1, 6, isLong ? "●" : "○",    text_color=isLong ? color.rgb(0,188,212) : color.gray, text_size=size.large)
