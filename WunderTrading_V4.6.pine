@@ -6,7 +6,7 @@
 //   - SELL label: exit reason shown ABOVE bar with fixed ATR offset, no overlap
 //   - plotshape triangles removed — labels carry all the information needed
 //@version=6
-strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true)
+strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, show_last=500, calc_on_order_fills=false, process_orders_on_close=true)
 
 // ─────────────────────────────────────────
 // INPUTS
@@ -221,37 +221,33 @@ if barstate.islast
     table.cell(dash, 2, 12, "SIZE",                bgcolor=color.rgb(30, 100, 200), text_color=color.white, text_halign=text.align_center)
 
 // ─────────────────────────────────────────
-// TRAFFIC LIGHTS — top_right table
-// Explicit cell widths prevent collapse on ultrawide screens
+// TRAFFIC LIGHTS — pinned label on last bar
+// Guaranteed visible on any screen/resolution
+// Draws as a label to the right of the latest candle
 // ─────────────────────────────────────────
-var table tl = table.new(
-     position.top_right,
-     2, 8,
-     border_width=1,
-     border_color=color.new(color.gray, 60))
-
 if barstate.islast
-    // Header
-    table.cell(tl, 0, 0, "SIGNAL",    width=8,  height=2, text_color=color.white,  bgcolor=color.rgb(30, 30, 30),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 0, "STATUS",    width=6,  height=2, text_color=color.white,  bgcolor=color.rgb(30, 30, 30),                                                    text_halign=text.align_center, text_size=size.small)
-    // Trend
-    table.cell(tl, 0, 1, "Trend",     width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 1, cond_trend  ? "PASS" : "WAIT",   width=6, height=2, text_color=color.white, bgcolor=cond_trend  ? color.rgb(76,175,80) : color.rgb(220,50,50), text_halign=text.align_center, text_size=size.small)
-    // RSI
-    table.cell(tl, 0, 2, "RSI",       width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 2, cond_rsi    ? "PASS" : "WAIT",   width=6, height=2, text_color=color.white, bgcolor=cond_rsi    ? color.rgb(76,175,80) : color.rgb(220,50,50), text_halign=text.align_center, text_size=size.small)
-    // MACD
-    table.cell(tl, 0, 3, "MACD",      width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 3, cond_macd   ? "PASS" : "WAIT",   width=6, height=2, text_color=color.white, bgcolor=cond_macd   ? color.rgb(76,175,80) : color.rgb(220,50,50), text_halign=text.align_center, text_size=size.small)
-    // Intensity
-    table.cell(tl, 0, 4, "Intensity", width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 4, cond_intens ? "PASS" : "WAIT",   width=6, height=2, text_color=color.white, bgcolor=cond_intens ? color.rgb(76,175,80) : color.rgb(220,50,50), text_halign=text.align_center, text_size=size.small)
-    // Squeeze
-    table.cell(tl, 0, 5, "Squeeze",   width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 5, cond_sqz    ? "FIRED" : "COIL",  width=6, height=2, text_color=color.white, bgcolor=cond_sqz    ? color.rgb(76,175,80) : color.rgb(255,152,0),  text_halign=text.align_center, text_size=size.small)
-    // Score
-    table.cell(tl, 0, 6, "Score",     width=8,  height=2, text_color=color.white,  bgcolor=color.rgb(40, 40, 40),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 6, str.tostring(score) + "/6",       width=6, height=2, text_color=color.white, bgcolor=score >= scoreTarget ? color.rgb(76,175,80) : color.rgb(220,50,50), text_halign=text.align_center, text_size=size.small)
-    // Position
-    table.cell(tl, 0, 7, "Position",  width=8,  height=2, text_color=color.silver, bgcolor=color.rgb(25, 25, 25),                                                    text_halign=text.align_left,   text_size=size.small)
-    table.cell(tl, 1, 7, strategy.position_size > 0 ? "IN" : "OUT", width=6, height=2, text_color=color.white, bgcolor=strategy.position_size > 0 ? color.rgb(0,188,212) : color.rgb(100,100,100), text_halign=text.align_center, text_size=size.small)
+    // Build the traffic light text using coloured circle characters
+    // Each line: indicator name + PASS/WAIT
+    tlText = "══ SIGNALS ══\n"
+           + (cond_trend  ? "🟢" : "🔴") + " Trend\n"
+           + (cond_rsi    ? "🟢" : "🔴") + " RSI  " + str.tostring(math.round(myRsi, 1)) + "\n"
+           + (cond_macd   ? "🟢" : "🔴") + " MACD\n"
+           + (cond_intens ? "🟢" : "🔴") + " Intensity\n"
+           + (cond_sqz    ? "🟢" : "🟡") + " Squeeze\n"
+           + "──────────\n"
+           + (score >= scoreTarget ? "🟢" : "🔴") + " Score: " + str.tostring(score) + "/6\n"
+           + (strategy.position_size > 0 ? "🔵 IN TRADE" : "⚪ FLAT")
+
+    tlColour = score >= scoreTarget ? color.rgb(20, 80, 20) : color.rgb(60, 20, 20)
+
+    label.new(
+         x         = bar_index + 3,
+         y         = high,
+         xloc      = xloc.bar_index,
+         yloc      = yloc.price,
+         text      = tlText,
+         color     = tlColour,
+         textcolor = color.white,
+         style     = label.style_label_left,
+         size      = size.normal,
+         textalign = text.align_left)
