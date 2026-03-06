@@ -1,4 +1,4 @@
-// WunderTrading Strategy V4.11
+// WunderTrading Strategy V4.7
 //@version=6
 strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
@@ -14,6 +14,7 @@ atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",     minval=1.
 cooldownBars   = input.int(1,      "Cooldown Bars After Exit",         minval=0,    maxval=20)
 tradePercent   = input.float(10.0, "% of Equity Per Trade",           minval=1.0,  maxval=100.0)
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
+trackFromDate  = input.time(timestamp("2024-01-01"), "Track Equity From Date")
 
 // ─────────────────────────────────────────
 // WUNDERTRADING ALERT MESSAGES
@@ -68,8 +69,11 @@ cooldownOk   = barsSinceSell >= cooldownBars
 buyCondition = score >= scoreTarget and cooldownOk
 
 // ─────────────────────────────────────────
-// EXIT CONDITIONS
+// EQUITY TRACKING FROM DATE
 // ─────────────────────────────────────────
+var float equityAtStartDate = na
+if na(equityAtStartDate) and time >= trackFromDate
+    equityAtStartDate := strategy.equity
 rsiExit       = myRsi < rsiExitLevel and myRsi < myRsi[1]
 ema9Exit      = ta.crossunder(close, ema9) and close < emaTrend
 macdExit      = ta.crossunder(macdLine, signalLine)
@@ -140,7 +144,7 @@ if isExit
 // ─────────────────────────────────────────
 // MAIN DASHBOARD — middle_right
 // ─────────────────────────────────────────
-var table dash = table.new(position.middle_left, 3, 13, bgcolor=color.new(color.black, 15), border_width=1)
+var table dash = table.new(position.middle_left, 3, 14, bgcolor=color.new(color.black, 15), border_width=1)
 if barstate.islastconfirmedhistory or barstate.islast
     table.cell(dash, 0, 0, "Condition",           width=14, height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_left,   text_size=size.small)
     table.cell(dash, 1, 0, "Value",               width=8,  height=2, text_color=color.white,  bgcolor=color.new(color.navy, 10), text_halign=text.align_center, text_size=size.small)
@@ -189,6 +193,11 @@ if barstate.islastconfirmedhistory or barstate.islast
     tradeValueUSD = currentEquity * (tradePercent / 100)
     tradeColor    = profitPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50)
 
+    // Growth since tracked date
+    trackedBase   = nz(equityAtStartDate, initialCap)
+    trackedPct    = ((currentEquity - trackedBase) / trackedBase) * 100
+    trackedColor  = trackedPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50)
+
     table.cell(dash, 0, 10, "── Compounding ──",  width=14, height=2, text_color=color.yellow, text_halign=text.align_left, bgcolor=color.new(color.black, 30), text_size=size.small)
     table.cell(dash, 1, 10, "",                   width=8,  height=2, bgcolor=color.new(color.black, 30))
     table.cell(dash, 2, 10, "",                   width=7,  height=2, bgcolor=color.new(color.black, 30))
@@ -197,9 +206,13 @@ if barstate.islastconfirmedhistory or barstate.islast
     table.cell(dash, 1, 11, "$" + str.tostring(math.round(currentEquity, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
     table.cell(dash, 2, 11, (profitPct >= 0 ? "+" : "") + str.tostring(math.round(profitPct, 1)) + "%", width=7, height=2, bgcolor=tradeColor, text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
-    table.cell(dash, 0, 12, "Next Trade (" + str.tostring(tradePercent) + "%)", width=14, height=2, text_color=color.silver, text_halign=text.align_left, text_size=size.small)
-    table.cell(dash, 1, 12, "$" + str.tostring(math.round(tradeValueUSD, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 12, "SIZE",               width=7,  height=2, bgcolor=color.rgb(30,100,200), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 0, 12, "Since " + str.format_time(trackFromDate, "dd MMM yy"), width=14, height=2, text_color=color.silver, text_halign=text.align_left, text_size=size.small)
+    table.cell(dash, 1, 12, "$" + str.tostring(math.round(trackedBase, 0)) + " → $" + str.tostring(math.round(currentEquity, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 2, 12, (trackedPct >= 0 ? "+" : "") + str.tostring(math.round(trackedPct, 1)) + "%", width=7, height=2, bgcolor=trackedColor, text_color=color.white, text_halign=text.align_center, text_size=size.small)
+
+    table.cell(dash, 0, 13, "Next Trade (" + str.tostring(tradePercent) + "%)", width=14, height=2, text_color=color.silver, text_halign=text.align_left, text_size=size.small)
+    table.cell(dash, 1, 13, "$" + str.tostring(math.round(tradeValueUSD, 0)), width=8, height=2, text_color=color.white, text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 2, 13, "SIZE",               width=7,  height=2, bgcolor=color.rgb(30,100,200), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
 // ─────────────────────────────────────────
 // TRAFFIC LIGHTS — middle_left
