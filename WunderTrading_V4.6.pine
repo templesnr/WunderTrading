@@ -1,4 +1,4 @@
-// WunderTrading Strategy V4.7
+// WunderTrading Strategy V4.12
 //@version=6
 strategy("WunderTrading Strategy V4.7", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
