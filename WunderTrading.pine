@@ -1,7 +1,8 @@
-// WunderTrading Strategy V4.16
-// - Starting capital set to $500 for realistic BTC backtest from Jan 2017
+// WunderTrading Strategy V4.17
+// - Starting capital $500
+// - trackFromDate now filters trade entries — set in strategy inputs, no Premium needed
 //@version=6
-strategy("WunderTrading Strategy V4.16", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+strategy("WunderTrading Strategy V4.17", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
 // Helper: coloured dot for traffic lights
 dot(b) => "●"
@@ -80,7 +81,7 @@ sellCondition = macdExit or rsiExit or ema9Exit
 // ─────────────────────────────────────────
 // EXECUTION & EXPLICIT ALERTS
 // ─────────────────────────────────────────
-buyCondition = score >= scoreTarget and cooldownOk
+buyCondition = score >= scoreTarget and cooldownOk and time >= trackFromDate
 enterSignal  = buyCondition and strategy.position_size == 0
 exitSignal   = strategy.position_size > 0 and ((not na(trailStop) and close < trailStop) or sellCondition)
 
