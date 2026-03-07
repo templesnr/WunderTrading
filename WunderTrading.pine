@@ -1,10 +1,19 @@
 // WunderTrading Strategy V4.18
 // - tradePercent default increased to 50% for testing higher position sizes
 //@version=6
-strategy("WunderTrading Strategy V4.18", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+strategy("WunderTrading Strategy v4.18", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
 // Helper: coloured dot for traffic lights
 dot(b) => "●"
+
+// ─────────────────────────────────────────
+// CONDITION TOGGLES
+// ─────────────────────────────────────────
+useTrend   = input.bool(true, "Use Trend (200 EMA)?")
+useRsi     = input.bool(true, "Use RSI?")
+useMacd    = input.bool(true, "Use MACD?")
+useIntens  = input.bool(true, "Use Bull Intensity?")
+useSqueeze = input.bool(true, "Use Squeeze?")
 
 // ─────────────────────────────────────────
 // INPUTS
@@ -13,10 +22,11 @@ rsiThreshold   = input.float(53.0, "RSI Buy Threshold",               minval=40.
 rsiExitLevel   = input.float(45.0, "RSI Exit Level",                  minval=30.0, maxval=55.0)
 bbMult         = input.float(2.0,  "BB Multiplier",                   minval=1.0,  maxval=4.0)
 intensTarget   = input.int(40,     "Bull Intensity Score Target",      minval=10,   maxval=90)
+// scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",         minval=1,    maxval=6)
 scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",         minval=1,    maxval=6)
 atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",     minval=1.0,  maxval=6.0)
 cooldownBars   = input.int(1,      "Cooldown Bars After Exit",         minval=0,    maxval=20)
-tradePercent   = input.float(50.0, "% of Equity Per Trade",           minval=1.0,  maxval=100.0)
+tradePercent   = input.float(75.0, "% of Equity Per Trade",           minval=1.0,  maxval=100.0)
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
 trackFromDate  = input.time(timestamp("2021-01-01"), "Track Equity From Date")
 
@@ -48,12 +58,15 @@ cond_macd   = macdLine > signalLine
 cond_intens = bullIntensity > intensTarget
 cond_sqz    = sqz_fire
 
+// ─────────────────────────────────────────
+// REVISED SCORING CHART (allowing toggles)
+// ─────────────────────────────────────────
 int score = 0
-score += cond_trend  ? 1 : 0
-score += cond_rsi    ? 1 : 0
-score += cond_macd   ? 1 : 0
-score += cond_intens ? 1 : 0
-score += cond_sqz    ? 2 : 0
+score += (useTrend   and cond_trend)  ? 1 : 0
+score += (useRsi     and cond_rsi)    ? 1 : 0
+score += (useMacd    and cond_macd)   ? 1 : 0
+score += (useIntens  and cond_intens) ? 1 : 0
+score += (useSqueeze and cond_sqz)    ? 2 : 0
 
 // ─────────────────────────────────────────
 // REVISED COOLDOWN (ChatGPT Logic)
