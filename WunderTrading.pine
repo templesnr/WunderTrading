@@ -1,19 +1,11 @@
-// WunderTrading Strategy V4.18
-// - tradePercent default increased to 50% for testing higher position sizes
+// WunderTrading Strategy V4.19
+// - Dynamic alert messages with calculated USDC amount for WunderTrading compounding
+// - Final production settings: 75% position size, scoreTarget=4, 1-day, from 2021-01-01
 //@version=6
-strategy("WunderTrading Strategy v4.18", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
+strategy("WunderTrading Strategy V4.19", overlay=true, initial_capital=500, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_order_fills=false, process_orders_on_close=true, explicit_plot_zorder=true)
 
 // Helper: coloured dot for traffic lights
 dot(b) => "●"
-
-// ─────────────────────────────────────────
-// CONDITION TOGGLES
-// ─────────────────────────────────────────
-useTrend   = input.bool(true, "Use Trend (200 EMA)?")
-useRsi     = input.bool(true, "Use RSI?")
-useMacd    = input.bool(true, "Use MACD?")
-useIntens  = input.bool(true, "Use Bull Intensity?")
-useSqueeze = input.bool(true, "Use Squeeze?")
 
 // ─────────────────────────────────────────
 // INPUTS
@@ -22,7 +14,6 @@ rsiThreshold   = input.float(53.0, "RSI Buy Threshold",               minval=40.
 rsiExitLevel   = input.float(45.0, "RSI Exit Level",                  minval=30.0, maxval=55.0)
 bbMult         = input.float(2.0,  "BB Multiplier",                   minval=1.0,  maxval=4.0)
 intensTarget   = input.int(40,     "Bull Intensity Score Target",      minval=10,   maxval=90)
-// scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",         minval=1,    maxval=6)
 scoreTarget    = input.int(4,      "Min Score to Enter (1-6)",         minval=1,    maxval=6)
 atrMult        = input.float(3.0,  "ATR Trailing Stop Multiplier",     minval=1.0,  maxval=6.0)
 cooldownBars   = input.int(1,      "Cooldown Bars After Exit",         minval=0,    maxval=20)
@@ -30,9 +21,10 @@ tradePercent   = input.float(75.0, "% of Equity Per Trade",           minval=1.0
 useTrendFilter = input.bool(true,  "Enable 200 EMA Trend Filter?")
 trackFromDate  = input.time(timestamp("2021-01-01"), "Track Equity From Date")
 
-// WUNDERTRADING ALERT MESSAGES
-enterLongMsg = input.string("PASTE_BUY_MSG",  "WunderTrading BUY Message")
-exitLongMsg  = input.string("PASTE_SELL_MSG", "WunderTrading SELL Message")
+// WUNDERTRADING ALERT MESSAGE CODES
+// Paste only the "code" value from your WunderTrading bot here (not the full JSON)
+enterCode = input.string("PASTE_BUY_CODE",  "WunderTrading BUY Code")
+exitCode  = input.string("PASTE_SELL_CODE", "WunderTrading SELL Code")
 
 // ─────────────────────────────────────────
 // CORE CALCULATIONS
@@ -58,18 +50,15 @@ cond_macd   = macdLine > signalLine
 cond_intens = bullIntensity > intensTarget
 cond_sqz    = sqz_fire
 
-// ─────────────────────────────────────────
-// REVISED SCORING CHART (allowing toggles)
-// ─────────────────────────────────────────
 int score = 0
-score += (useTrend   and cond_trend)  ? 1 : 0
-score += (useRsi     and cond_rsi)    ? 1 : 0
-score += (useMacd    and cond_macd)   ? 1 : 0
-score += (useIntens  and cond_intens) ? 1 : 0
-score += (useSqueeze and cond_sqz)    ? 2 : 0
+score += cond_trend  ? 1 : 0
+score += cond_rsi    ? 1 : 0
+score += cond_macd   ? 1 : 0
+score += cond_intens ? 1 : 0
+score += cond_sqz    ? 2 : 0
 
 // ─────────────────────────────────────────
-// REVISED COOLDOWN (ChatGPT Logic)
+// COOLDOWN
 // ─────────────────────────────────────────
 var int barsSinceExit = 999
 justExited = strategy.position_size[1] > 0 and strategy.position_size == 0
@@ -85,13 +74,22 @@ cooldownOk = barsSinceExit >= cooldownBars
 // EXIT LOGIC & TRAILING STOP
 // ─────────────────────────────────────────
 var float trailStop = na
-rsiExit  = myRsi < rsiExitLevel and myRsi < myRsi[1]
-ema9Exit = ta.crossunder(close, ema9) and close < emaTrend
-macdExit = ta.crossunder(macdLine, signalLine)
+rsiExit       = myRsi < rsiExitLevel and myRsi < myRsi[1]
+ema9Exit      = ta.crossunder(close, ema9) and close < emaTrend
+macdExit      = ta.crossunder(macdLine, signalLine)
 sellCondition = macdExit or rsiExit or ema9Exit
 
 // ─────────────────────────────────────────
-// EXECUTION & EXPLICIT ALERTS
+// DYNAMIC ALERT MESSAGES
+// Calculates exact USDC amount to send to WunderTrading each trade
+// so position sizing compounds automatically with growing equity
+// ─────────────────────────────────────────
+usdcAmount   = strategy.equity * (tradePercent / 100)
+enterLongMsg = '{"code": "' + enterCode + '", "amountPerTrade": "' + str.tostring(math.round(usdcAmount, 2)) + '", "amountPerTradeType": "quote"}'
+exitLongMsg  = '{"code": "' + exitCode  + '", "amountPerTrade": "0", "amountPerTradeType": "quote"}'
+
+// ─────────────────────────────────────────
+// EXECUTION
 // ─────────────────────────────────────────
 buyCondition = score >= scoreTarget and cooldownOk and time >= trackFromDate
 enterSignal  = buyCondition and strategy.position_size == 0
@@ -115,8 +113,6 @@ if exitSignal
 // ─────────────────────────────────────────
 plot(emaTrend, "200 EMA", color.new(color.gray, 50), 1)
 plot(strategy.position_size > 0 ? trailStop : na, "Stop", color.red, 2, plot.style_linebr)
-
-// Invisible spacer to push the price scale so table doesn't cover candles
 plot(low * 0.85, "spacer", color.new(color.white, 100))
 
 if enterSignal
@@ -126,22 +122,23 @@ if exitSignal
     label.new(bar_index, high + (atrVal * 0.5), "▼ SELL", color=color.rgb(220, 50, 50), textcolor=color.white, style=label.style_label_down, size=size.small)
 
 // ─────────────────────────────────────────
-// PRE-COMPUTE all values before barstate blocks (required in Pine v6)
+// PRE-COMPUTE for dashboards (Pine v6 required)
 // ─────────────────────────────────────────
-isLong       = strategy.position_size > 0
+isLong        = strategy.position_size > 0
 currentEquity = strategy.equity
-profitPct    = ((currentEquity - strategy.initial_capital) / strategy.initial_capital) * 100
-cdRemain     = math.max(cooldownBars - barsSinceExit, 0)
-trailStopVal = isLong and not na(trailStop) ? "$" + str.tostring(math.round(trailStop, 0)) : "—"
+profitPct     = ((currentEquity - strategy.initial_capital) / strategy.initial_capital) * 100
+cdRemain      = math.max(cooldownBars - barsSinceExit, 0)
+trailStopVal  = isLong and not na(trailStop) ? "$" + str.tostring(math.round(trailStop, 0)) : "—"
+nextTradeUSDC = math.round(currentEquity * (tradePercent / 100), 2)
 
 // ─────────────────────────────────────────
 // DASHBOARD 1: MAIN STATS (Middle Left)
 // ─────────────────────────────────────────
-var table dash = table.new(position.middle_left, 3, 13, bgcolor=color.rgb(20, 20, 20), border_width=1, border_color=color.gray)
+var table dash = table.new(position.middle_left, 3, 14, bgcolor=color.rgb(20, 20, 20), border_width=1, border_color=color.gray)
 if barstate.islastconfirmedhistory or barstate.islast
-    table.cell(dash, 0, 0, "Condition",           text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_left,   text_size=size.small)
-    table.cell(dash, 1, 0, "Value",               text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_center, text_size=size.small)
-    table.cell(dash, 2, 0, "Signal",              text_color=color.white,  bgcolor=color.rgb(30,30,80),  text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 0, 0, "Condition",           text_color=color.white,  bgcolor=color.rgb(30,30,80), text_halign=text.align_left,   text_size=size.small)
+    table.cell(dash, 1, 0, "Value",               text_color=color.white,  bgcolor=color.rgb(30,30,80), text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 2, 0, "Signal",              text_color=color.white,  bgcolor=color.rgb(30,30,80), text_halign=text.align_center, text_size=size.small)
 
     table.cell(dash, 0, 1, "1. Trend (200 EMA)",  text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
     table.cell(dash, 1, 1, close > emaTrend ? "Above" : "Below", text_color=color.silver, text_halign=text.align_center, text_size=size.small)
@@ -184,8 +181,12 @@ if barstate.islastconfirmedhistory or barstate.islast
     table.cell(dash, 2, 10, "",                   bgcolor=color.rgb(40,40,40))
 
     table.cell(dash, 0, 11, "Current Equity",     text_color=color.silver, text_halign=text.align_left,  text_size=size.small)
-    table.cell(dash, 1, 11, "$" + str.tostring(math.round(currentEquity, 0)), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 1, 11, "$" + str.tostring(math.round(currentEquity, 2)), text_color=color.white, text_halign=text.align_center, text_size=size.small)
     table.cell(dash, 2, 11, (profitPct >= 0 ? "+" : "") + str.tostring(math.round(profitPct, 1)) + "%", bgcolor=profitPct >= 0 ? color.rgb(76,175,80) : color.rgb(220,50,50), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+
+    table.cell(dash, 0, 12, "Next Trade (" + str.tostring(tradePercent) + "%)", text_color=color.silver, text_halign=text.align_left, text_size=size.small)
+    table.cell(dash, 1, 12, "$" + str.tostring(nextTradeUSDC), text_color=color.white, text_halign=text.align_center, text_size=size.small)
+    table.cell(dash, 2, 12, "USDC", bgcolor=color.rgb(30,100,200), text_color=color.white, text_halign=text.align_center, text_size=size.small)
 
 // ─────────────────────────────────────────
 // DASHBOARD 2: TRAFFIC LIGHTS (Bottom Center)
